@@ -68,8 +68,8 @@ label{display:block;font-size:13px;font-weight:500;margin:12px 0 4px}
 <div class="overlay" id="edit">
   <form class="sheet" id="ef">
     <h2 id="et">Thêm video</h2>
-    <label for="f-url">Link video</label>
-    <input id="f-url" type="url" placeholder="https://..." required>
+    <label for="f-url">Link video hoặc mã nhúng iframe</label>
+    <input id="f-url" type="text" inputmode="url" autocomplete="off" placeholder="https://... hoặc &lt;iframe src=&quot;...&quot;&gt;" required>
     <div id="st"></div>
     <label for="f-title">Tiêu đề</label>
     <input id="f-title" type="text">
@@ -284,13 +284,33 @@ function openEdit(v) {
   $('#f-fb').value = localStorage.getItem('fb') || 'shot';
   $('#del').style.display = v ? '' : 'none';
   $('#st').textContent = '';
+  lastFilled = v ? v.url : '';
   $('#edit').classList.add('on');
   if (!v) $('#f-url').focus();
 }
 
+let lastFilled = '';
+function normalizeUrl() {
+  const el = $('#f-url');
+  const raw = el.value.trim();
+  if (!/<iframe/i.test(raw)) return;
+  const a = /\bsrc\s*=\s*"([^"]*)"/i.exec(raw) || /\bsrc\s*=\s*'([^']*)'/i.exec(raw) || /\bsrc\s*=\s*([^\s>]+)/i.exec(raw);
+  if (!a) { $('#st').textContent = 'Không tìm thấy src trong mã iframe.'; return; }
+  let src = a[1].replace(/&amp;/g, '&').trim();
+  if (src.startsWith('//')) src = 'https:' + src;
+  el.value = src;
+  if ($('#f-mode').value === 'auto') $('#f-mode').value = 'embed';
+  const t = /\btitle\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(raw);
+  if (t && !$('#f-title').value) $('#f-title').value = t[1] || t[2] || '';
+  $('#st').textContent = 'Đã lấy link từ mã iframe, cách mở đặt là “Nhúng trang”.';
+}
+
 async function autoFill(force) {
+  normalizeUrl();
   const url = $('#f-url').value.trim();
   if (!/^https?:\/\//i.test(url)) return;
+  if (!force && url === lastFilled) return;
+  lastFilled = url;
   const fb = $('#f-fb').value;
   localStorage.setItem('fb', fb);
   $('#st').textContent = 'Đang lấy tiêu đề và ảnh (có thể mất vài giây)…';
@@ -305,13 +325,16 @@ async function autoFill(force) {
   $('#st').textContent = m.thumb ? `Ảnh lấy từ: ${m.src}.` + (m.src === 'ảnh chụp trang' ? ' (lần đầu ảnh có thể hiện chậm)' : '') : 'Không tìm thấy ảnh, thumbnail để trắng.';
 }
 $('#f-url').addEventListener('change', () => autoFill(false));
+$('#f-url').addEventListener('paste', () => setTimeout(() => autoFill(false), 0));
 $('#refetch').onclick = () => autoFill(true);
 $('#add').onclick = () => openEdit(null);
 $('#cancel').onclick = () => $('#edit').classList.remove('on');
 
 $('#ef').addEventListener('submit', async e => {
   e.preventDefault();
+  normalizeUrl();
   const url = $('#f-url').value.trim();
+  if (!/^https?:\/\//i.test(url)) { toast('Link không hợp lệ'); return; }
   if (!editId && !$('#f-title').value && !$('#f-thumb').value) await autoFill(false);
   const data = {
     url,
