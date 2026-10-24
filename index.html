@@ -57,19 +57,12 @@ label{display:block;font-size:13px;font-weight:500;margin:12px 0 4px}
 <header>
   <h1>Video</h1>
   <input id="q" type="search" placeholder="Tìm theo tiêu đề hoặc link">
+  <button class="btn" id="bk" title="Tải file sao lưu">Sao lưu</button>
+  <button class="btn" id="rs" title="Khôi phục từ file">Khôi phục</button>
+  <input type="file" id="rf" accept="application/json" hidden>
   <button class="btn pri" id="add">Thêm</button>
 </header>
 <main><div id="grid"></div></main>
-
-<div class="overlay" id="login">
-  <form class="sheet" id="lf">
-    <h2>Đăng nhập</h2>
-    <label for="pw">Mật khẩu</label>
-    <input id="pw" type="password" autocomplete="current-password" required>
-    <div id="lerr" style="color:var(--danger);font-size:13px;margin-top:6px"></div>
-    <div class="row"><button class="btn pri grow">Vào</button></div>
-  </form>
-</div>
 
 <div class="overlay" id="edit">
   <form class="sheet" id="ef">
@@ -117,41 +110,44 @@ label{display:block;font-size:13px;font-weight:500;margin:12px 0 4px}
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let pass = localStorage.getItem('vp') || '';
 let videos = [];
 let editId = null;
 let curEmbed = true;
 
 function toast(t){const e=$('#toast');e.textContent=t;e.style.display='block';clearTimeout(toast.t);toast.t=setTimeout(()=>e.style.display='none',2200)}
 
-async function api(path, opt = {}) {
-  const r = await fetch(path, { ...opt, headers: { 'x-pass': pass, 'Content-Type': 'application/json' } });
-  if (r.status === 401) throw new Error('401');
-  if (!r.ok) throw new Error(String(r.status));
-  return r.json();
-}
-
 async function save() {
   localStorage.setItem('vc', JSON.stringify(videos));
-  try { await api('/api/videos', { method: 'PUT', body: JSON.stringify(videos) }); }
-  catch { toast('Chưa lưu được lên server'); }
 }
 
-async function load() {
+function load() {
   try { videos = JSON.parse(localStorage.getItem('vc') || '[]'); } catch { videos = []; }
   render();
+  const id = new URLSearchParams(location.search).get('v');
+  const v = videos.find(x => x.id === id);
+  if (v) openVideo(v);
+}
+
+/* lấy tiêu đề + ảnh: oEmbed (noembed) trước, rồi đọc thẻ og qua proxy CORS */
+async function getMeta(url) {
+  const out = { title: '', thumb: '' };
+  const t = ms => AbortSignal.timeout(ms);
   try {
-    videos = await api('/api/videos');
-    localStorage.setItem('vc', JSON.stringify(videos));
-    $('#login').classList.remove('on');
-    render();
-    const id = new URLSearchParams(location.search).get('v');
-    const v = videos.find(x => x.id === id);
-    if (v) openVideo(v);
-  } catch (e) {
-    if (e.message === '401') { $('#login').classList.add('on'); }
-    else toast('Không tải được danh sách');
-  }
+    const r = await fetch('https://noembed.com/embed?url=' + encodeURIComponent(url), { signal: t(7000) });
+    const j = await r.json();
+    if (!j.error) { out.title = j.title || ''; out.thumb = j.thumbnail_url || ''; }
+  } catch {}
+  if (out.title && out.thumb) return out;
+  try {
+    const r = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(url), { signal: t(9000) });
+    const html = (await r.text()).slice(0, 400000);
+    const d = new DOMParser().parseFromString(html, 'text/html');
+    const m = n => d.querySelector(`meta[property="${n}"],meta[name="${n}"]`)?.content?.trim() || '';
+    if (!out.title) out.title = m('og:title') || m('twitter:title') || d.title || '';
+    if (/^(just a moment|attention required|access denied)/i.test(out.title)) out.title = '';
+    if (!out.thumb) { const i = m('og:image') || m('twitter:image'); if (i) { try { out.thumb = new URL(i, url).href; } catch {} } }
+  } catch {}
+  return out;
 }
 
 /* ---------- nhận diện link ---------- */
@@ -276,12 +272,11 @@ async function autoFill(force) {
   if (!/^https?:\/\//i.test(url)) return;
   $('#st').textContent = 'Đang lấy tiêu đề và ảnh…';
   let m = {};
-  try { m = await api('/api/meta?url=' + encodeURIComponent(url)); } catch {}
+  try { m = await getMeta(url); } catch {}
   const y = ytId(url);
   if (!m.thumb && y) m.thumb = `https://img.youtube.com/vi/${y}/hqdefault.jpg`;
   if (force || !$('#f-title').value) $('#f-title').value = m.title || fileName(url) || hostOf(url);
   if (force || !$('#f-thumb').value) $('#f-thumb').value = m.thumb || '';
-  curEmbed = m.embeddable !== false;
   $('#st').textContent = m.thumb ? 'Đã lấy xong.' : 'Không tìm thấy ảnh, thumbnail sẽ để trắng.';
 }
 $('#f-url').addEventListener('change', () => autoFill(false));
@@ -313,17 +308,26 @@ $('#del').onclick = async () => {
   render(); await save();
 };
 
-/* ---------- đăng nhập ---------- */
-$('#lf').addEventListener('submit', async e => {
-  e.preventDefault();
-  pass = $('#pw').value;
+/* ---------- sao lưu / khôi phục ---------- */
+$('#bk').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(videos, null, 1)], { type: 'application/json' }));
+  a.download = 'video-library-' + new Date().toISOString().slice(0, 10) + '.json';
+  a.click(); URL.revokeObjectURL(a.href);
+};
+$('#rs').onclick = () => $('#rf').click();
+$('#rf').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
   try {
-    await api('/api/videos');
-    localStorage.setItem('vp', pass);
-    $('#lerr').textContent = '';
-    load();
-  } catch { $('#lerr').textContent = 'Sai mật khẩu hoặc chưa cấu hình server.'; }
-});
+    const data = JSON.parse(await f.text());
+    if (!Array.isArray(data)) throw 0;
+    const have = new Set(videos.map(v => v.id));
+    const add = data.filter(v => v && v.id && v.url && !have.has(v.id));
+    videos = [...add, ...videos];
+    render(); await save(); toast('Đã thêm ' + add.length + ' video');
+  } catch { toast('File không hợp lệ'); }
+  e.target.value = '';
+};
 
 load();
 </script>
