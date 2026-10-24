@@ -90,6 +90,7 @@ label{display:block;font-size:13px;font-weight:500;margin:12px 0 4px}
       <option value="link">Chỉ mở link sang trang gốc</option>
     </select>
     <label class="chk"><input type="checkbox" id="f-noref"> Không gửi referrer khi nhúng (thử nếu khung bị đen/trắng)</label>
+    <label class="chk"><input type="checkbox" id="f-nosb"> Tắt chặn chuyển hướng (chỉ bật nếu video không phát được)</label>
     <div class="row"><button type="button" class="btn" id="refetch">Lấy lại tiêu đề và ảnh</button></div>
     <div class="row">
       <button class="btn pri grow">Lưu</button>
@@ -105,7 +106,7 @@ label{display:block;font-size:13px;font-weight:500;margin:12px 0 4px}
     <div id="pbar">
       <h2 id="pt"></h2>
       <div class="row" style="margin-top:0">
-        <a class="btn" id="po" target="_blank" rel="noopener" style="text-decoration:none">Mở trang gốc</a>
+        <a class="btn" id="po" target="_blank" rel="noopener" style="text-decoration:none">Mở trang gốc (tab mới)</a>
         <button class="btn" id="pc">Sao chép link</button>
         <button class="btn" id="pe">Sửa</button>
         <button class="btn" id="px">Đóng</button>
@@ -235,6 +236,8 @@ async function openVideo(v) {
   if (r.kind === 'iframe') {
     const f = document.createElement('iframe');
     if (v.noref) f.referrerPolicy = 'no-referrer';
+    // sandbox không có allow-top-navigation => trang nhúng không thể tự chuyển hướng cả web của bạn
+    if (!v.nosb) f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-presentation');
     f.allow = 'autoplay; fullscreen; picture-in-picture; encrypted-media';
     f.allowFullscreen = true;
     f.src = r.src;
@@ -277,6 +280,7 @@ function openEdit(v) {
   $('#f-thumb').value = v?.thumb || '';
   $('#f-mode').value = v?.mode || 'auto';
   $('#f-noref').checked = !!v?.noref;
+  $('#f-nosb').checked = !!v?.nosb;
   $('#f-fb').value = localStorage.getItem('fb') || 'shot';
   $('#del').style.display = v ? '' : 'none';
   $('#st').textContent = '';
@@ -315,6 +319,7 @@ $('#ef').addEventListener('submit', async e => {
     thumb: $('#f-thumb').value.trim(),
     mode: $('#f-mode').value,
     noref: $('#f-noref').checked,
+    nosb: $('#f-nosb').checked,
   };
   if (editId) Object.assign(videos.find(v => v.id === editId), data);
   else videos.unshift({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), ...data });
